@@ -1,0 +1,126 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'Inter Tight', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-serif: 'Instrument Serif', 'Times New Roman', serif;
+  --color-ink: #2c2a26;
+  --color-ink-soft: #6a655e;
+  --color-muted: #8d877e;
+  --color-line: #e4dfd6;
+  --color-line-strong: #d5cfc4;
+  --color-paper: #f7f4ef;
+  --color-paper-deep: #f1ece4;
+  --color-floor: #ece6db;
+  --color-wall: #d8d0c4;
+  --color-panel: rgba(255, 252, 248, 0.92);
+  --color-accent: #3f3a33;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background: var(--color-paper);
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+button,
+input,
+select {
+  font-family: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+::selection {
+  background: #e8dfd2;
+}
+
+.app-boot {
+  height: 100%;
+  background: var(--color-paper);
+}
+
+.panel {
+  background: var(--color-panel);
+  border: 1px solid var(--color-line);
+  box-shadow: 0 10px 30px rgba(44, 42, 38, 0.05);
+  backdrop-filter: blur(18px);
+}
+
+.hairline {
+  background: var(--color-line);
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #d5cfc4 transparent;
+}
+
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: #d5cfc4;
+  border-radius: 99px;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.anim-fade {
+  animation: fade-in 140ms ease-out;
+}
+
+.anim-rise {
+  animation: rise-in 180ms ease-out;
+}
+
+.anim-pop {
+  animation: pop-in 140ms ease-out;
+}
