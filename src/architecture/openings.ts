@@ -37,25 +37,32 @@ export function wallSolidSegments(wall: Wall, plan: FloorPlan): { start: Point; 
   }))
 }
 
+/** Wall-local swing basis shared by 2D and 3D. +tangent is start→end, +normal is left of that. */
+export function doorSwingBasis(door: Pick<Door, 'hingeSide' | 'swingDirection'>) {
+  return {
+    closedAlong: door.hingeSide === 'start' ? 1 : -1,
+    swingSign: door.swingDirection === 'left' ? 1 : -1,
+  }
+}
+
 export function doorGeometry(wall: Wall, door: Door) {
   const dir = wallDirection(wall)
   const normal = wallNormal(wall)
+  const { closedAlong, swingSign } = doorSwingBasis(door)
   const gapStart = pointAlongWall(wall, door.offset)
   const gapEnd = pointAlongWall(wall, door.offset + door.width)
   const hinge = door.hingeSide === 'start' ? gapStart : gapEnd
   const closedLeaf = door.hingeSide === 'start' ? gapEnd : gapStart
-  const swing = door.swingDirection === 'left' ? 1 : -1
   const slab = {
-    x: hinge.x + normal.x * swing * door.width,
-    y: hinge.y + normal.y * swing * door.width,
+    x: hinge.x + normal.x * swingSign * door.width,
+    y: hinge.y + normal.y * swingSign * door.width,
   }
   const arc: Point[] = []
   for (let i = 0; i <= 10; i += 1) {
     const t = (i / 10) * (Math.PI / 2)
-    const along = door.hingeSide === 'start' ? 1 : -1
     arc.push({
-      x: hinge.x + (dir.x * along * Math.cos(t) + normal.x * swing * Math.sin(t)) * door.width,
-      y: hinge.y + (dir.y * along * Math.cos(t) + normal.y * swing * Math.sin(t)) * door.width,
+      x: hinge.x + (dir.x * closedAlong * Math.cos(t) + normal.x * swingSign * Math.sin(t)) * door.width,
+      y: hinge.y + (dir.y * closedAlong * Math.cos(t) + normal.y * swingSign * Math.sin(t)) * door.width,
     })
   }
   return { gapStart, gapEnd, hinge, closedLeaf, slab, arc, angle: wallAngle(wall) }

@@ -16,7 +16,7 @@ export function SpacesScreen() {
       <div className="mx-auto max-w-6xl px-8 pb-20 pt-10">
         <div className="flex items-end justify-between gap-6">
           <div>
-            <p className="font-serif text-[34px] leading-none tracking-tight text-ink">Within</p>
+            <p className="font-serif text-[34px] leading-none tracking-tight text-ink">Plane</p>
             <h1 className="mt-6 text-[13px] font-medium uppercase tracking-[0.18em] text-muted">
               Spaces
             </h1>

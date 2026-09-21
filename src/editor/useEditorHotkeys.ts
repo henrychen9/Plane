@@ -16,6 +16,16 @@ export function useEditorHotkeys() {
       if (isTextInput(event.target)) return
       const editor = useEditorStore.getState()
       const projects = useProjectStore.getState()
+      if (editor.displayMode === '3d') {
+        if (event.key === 'Shift') editor.setModifiers({ shiftHeld: true })
+        const meta = event.metaKey || event.ctrlKey
+        if (meta && event.key.toLowerCase() === 'z') {
+          event.preventDefault()
+          if (event.shiftKey) editor.redo()
+          else editor.undo()
+        }
+        return
+      }
       if (event.key === ' ' && !event.repeat) {
         event.preventDefault()
         editor.setModifiers({ spaceHeld: true })
@@ -127,20 +137,26 @@ export function useEditorHotkeys() {
       if (event.key === 'Shift') editor.setModifiers({ shiftHeld: false })
     }
 
+    const onBlur = () => {
+      useEditorStore.getState().setModifiers({ shiftHeld: false, altHeld: false, spaceHeld: false })
+    }
+
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
+    window.addEventListener('blur', onBlur)
     return () => {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
+      window.removeEventListener('blur', onBlur)
     }
   }, [])
 }
 
 export function dropCatalogItem(type: string, clientX: number, clientY: number) {
   const hit = document.elementFromPoint(clientX, clientY)
-  if (hit?.closest('[data-within-panel]')) return
-  const canvas = document.querySelector('[data-within-canvas]')
-  if (!canvas || !hit?.closest('[data-within-canvas]')) return
+  if (hit?.closest('[data-plane-panel]')) return
+  const canvas = document.querySelector('[data-plane-canvas]')
+  if (!canvas || !hit?.closest('[data-plane-canvas]')) return
 
   const editor = useEditorStore.getState()
   const { projectId, layoutId, zoom, pan } = editor

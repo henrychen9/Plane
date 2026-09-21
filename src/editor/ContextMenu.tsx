@@ -214,7 +214,7 @@ export function DeleteWallDialog() {
   if (!pending || !projectId || !layoutId) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10" data-within-panel="true">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10" data-plane-panel="true">
       <div className="panel w-80 rounded-2xl p-5">
         <p className="font-serif text-[24px] text-ink">Delete wall?</p>
         <p className="mt-2 text-[13px] text-ink-soft">

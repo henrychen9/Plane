@@ -509,6 +509,14 @@ export function updateRoomMeta(
   }
 }
 
+export function setAllRoomsFloorMaterial(plan: FloorPlan, floorMaterial: string): FloorPlan {
+  if (plan.rooms.length === 0) return plan
+  return {
+    ...plan,
+    rooms: plan.rooms.map((room) => ({ ...room, floorMaterial })),
+  }
+}
+
 export function addMeasurement(plan: FloorPlan, start: Point, end: Point): FloorPlan {
   if (distance(start, end) < 1) return plan
   return {

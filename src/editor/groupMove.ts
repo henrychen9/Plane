@@ -13,59 +13,271 @@ import type {
   WindowOpening,
 } from '../types/spatial'
 import { furnitureAABB } from '../utils/geometry'
-import { pointAlongWall } from '../architecture/geometry'
-import { pruneUnusedVertices } from '../architecture/vertices'
+import { clampOffsetForOpening, clampOffsetOnWall, pointAlongWall } from '../architecture/geometry'
+import { nearestWall } from '../architecture/plan'
+import { pruneUnusedVertices, refreshPlanGeometry } from '../architecture/vertices'
+import { createId } from '../utils/id'
 import { isSelected } from './selection'
+
+export type OrphanMountedSnapshot = {
+  kind: 'door' | 'window' | 'outlet' | 'switch'
+  id: string
+  x: number
+  y: number
+  width?: number
+}
 
 export type GroupSnapshot = {
   furniture: Record<string, { x: number; y: number }>
   fixtures: Record<string, { x: number; y: number }>
+  vertices: Record<string, { x: number; y: number }>
+  orphanMounted: OrphanMountedSnapshot[]
 }
 
-export function snapshotFreeGroup(layout: Layout, selections: EditorSelection[]): GroupSnapshot {
+function selectedWallIdSet(selections: EditorSelection[]): Set<string> {
+  return new Set(selections.filter((item) => item.kind === 'wall').map((item) => item.id))
+}
+
+function selectedWallVertexIds(plan: FloorPlan, selections: EditorSelection[]): Set<string> {
+  const wallIds = selectedWallIdSet(selections)
+  const ids = new Set<string>()
+  for (const wall of plan.walls) {
+    if (!wallIds.has(wall.id)) continue
+    ids.add(wall.startVertexId)
+    ids.add(wall.endVertexId)
+  }
+  return ids
+}
+
+/** Duplicate vertices shared between selected and unselected walls so unselected walls stay put. */
+export function detachBoundaryVertices(layout: Layout, selections: EditorSelection[]): Layout {
+  const selectedWallIds = selectedWallIdSet(selections)
+  if (selectedWallIds.size === 0) return layout
+
+  const usage = new Map<string, { selected: boolean; unselected: boolean }>()
+  for (const wall of layout.plan.walls) {
+    const selected = selectedWallIds.has(wall.id)
+    for (const vertexId of [wall.startVertexId, wall.endVertexId]) {
+      const entry = usage.get(vertexId) ?? { selected: false, unselected: false }
+      if (selected) entry.selected = true
+      else entry.unselected = true
+      usage.set(vertexId, entry)
+    }
+  }
+
+  const remaps = new Map<string, string>()
+  const copies: Vertex[] = []
+  for (const vertex of layout.plan.vertices ?? []) {
+    const entry = usage.get(vertex.id)
+    if (!entry?.selected || !entry.unselected) continue
+    const copy: Vertex = { id: createId('vtx'), x: vertex.x, y: vertex.y }
+    copies.push(copy)
+    remaps.set(vertex.id, copy.id)
+  }
+  if (remaps.size === 0) return layout
+
+  const walls = layout.plan.walls.map((wall) => {
+    if (!selectedWallIds.has(wall.id)) return wall
+    return {
+      ...wall,
+      startVertexId: remaps.get(wall.startVertexId) ?? wall.startVertexId,
+      endVertexId: remaps.get(wall.endVertexId) ?? wall.endVertexId,
+    }
+  })
+
+  return {
+    ...layout,
+    plan: refreshPlanGeometry({
+      ...layout.plan,
+      vertices: [...(layout.plan.vertices ?? []), ...copies],
+      walls,
+    }),
+  }
+}
+
+export function snapshotRigidGroup(layout: Layout, selections: EditorSelection[]): GroupSnapshot {
   const furniture: GroupSnapshot['furniture'] = {}
   const fixtures: GroupSnapshot['fixtures'] = {}
+  const vertices: GroupSnapshot['vertices'] = {}
+  const orphanMounted: OrphanMountedSnapshot[] = []
+  const selectedWallIds = selectedWallIdSet(selections)
+  const vertexIds = selectedWallVertexIds(layout.plan, selections)
+
   for (const item of layout.furniture) {
     if (isSelected(selections, 'furniture', item.id)) furniture[item.id] = { x: item.x, y: item.y }
   }
   for (const fixture of layout.plan.fixtures) {
     if (isSelected(selections, 'fixture', fixture.id)) fixtures[fixture.id] = { x: fixture.x, y: fixture.y }
   }
-  return { furniture, fixtures }
+  for (const vertex of layout.plan.vertices ?? []) {
+    if (vertexIds.has(vertex.id)) vertices[vertex.id] = { x: vertex.x, y: vertex.y }
+  }
+
+  const captureOrphan = (
+    kind: OrphanMountedSnapshot['kind'],
+    id: string,
+    wallId: string,
+    offset: number,
+    width?: number,
+  ) => {
+    if (selectedWallIds.has(wallId)) return
+    const wall = layout.plan.walls.find((item) => item.id === wallId)
+    if (!wall) return
+    const point = pointAlongWall(wall, offset)
+    orphanMounted.push({ kind, id, x: point.x, y: point.y, width })
+  }
+
+  for (const door of layout.plan.doors) {
+    if (isSelected(selections, 'door', door.id)) {
+      captureOrphan('door', door.id, door.wallId, door.offset, door.width)
+    }
+  }
+  for (const window of layout.plan.windows) {
+    if (isSelected(selections, 'window', window.id)) {
+      captureOrphan('window', window.id, window.wallId, window.offset, window.width)
+    }
+  }
+  for (const outlet of layout.plan.outlets) {
+    if (isSelected(selections, 'outlet', outlet.id)) {
+      captureOrphan('outlet', outlet.id, outlet.wallId, outlet.offset)
+    }
+  }
+  for (const item of layout.plan.switches) {
+    if (isSelected(selections, 'switch', item.id)) {
+      captureOrphan('switch', item.id, item.wallId, item.offset)
+    }
+  }
+
+  return { furniture, fixtures, vertices, orphanMounted }
 }
 
-let activeGroup: {
-  snapshot: GroupSnapshot
-  draggedId: string
-  originX: number
-  originY: number
-} | null = null
+export function snapshotFreeGroup(layout: Layout, selections: EditorSelection[]): GroupSnapshot {
+  return snapshotRigidGroup(layout, selections)
+}
+
+function reattachOrphans(plan: FloorPlan, snapshot: GroupSnapshot, dx: number, dy: number): FloorPlan {
+  if (snapshot.orphanMounted.length === 0) return plan
+  let doors = plan.doors
+  let windows = plan.windows
+  let outlets = plan.outlets
+  let switches = plan.switches
+
+  for (const item of snapshot.orphanMounted) {
+    const point = { x: item.x + dx, y: item.y + dy }
+    const hit = nearestWall(plan, point, Number.POSITIVE_INFINITY)
+    if (!hit) continue
+    if (item.kind === 'door') {
+      const width = item.width ?? doors.find((entry) => entry.id === item.id)?.width ?? 30
+      const offset = clampOffsetForOpening(hit.offset, width, hit.wall)
+      doors = doors.map((entry) =>
+        entry.id === item.id ? { ...entry, wallId: hit.wall.id, offset } : entry,
+      )
+    } else if (item.kind === 'window') {
+      const width = item.width ?? windows.find((entry) => entry.id === item.id)?.width ?? 36
+      const offset = clampOffsetForOpening(hit.offset, width, hit.wall)
+      windows = windows.map((entry) =>
+        entry.id === item.id ? { ...entry, wallId: hit.wall.id, offset } : entry,
+      )
+    } else if (item.kind === 'outlet') {
+      const offset = clampOffsetOnWall(hit.offset, hit.wall)
+      outlets = outlets.map((entry) =>
+        entry.id === item.id ? { ...entry, wallId: hit.wall.id, offset } : entry,
+      )
+    } else {
+      const offset = clampOffsetOnWall(hit.offset, hit.wall)
+      switches = switches.map((entry) =>
+        entry.id === item.id ? { ...entry, wallId: hit.wall.id, offset } : entry,
+      )
+    }
+  }
+
+  return { ...plan, doors, windows, outlets, switches }
+}
+
+export function translateLayoutGroup(layout: Layout, snapshot: GroupSnapshot, dx: number, dy: number): Layout {
+  const furniture = layout.furniture.map((item) => {
+    const origin = snapshot.furniture[item.id]
+    return origin ? { ...item, x: origin.x + dx, y: origin.y + dy } : item
+  })
+  const fixtures = layout.plan.fixtures.map((fixture) => {
+    const origin = snapshot.fixtures[fixture.id]
+    return origin ? { ...fixture, x: origin.x + dx, y: origin.y + dy } : fixture
+  })
+  const movedVertices = snapshot.vertices && Object.keys(snapshot.vertices).length > 0
+  const vertices = movedVertices
+    ? (layout.plan.vertices ?? []).map((vertex) => {
+        const origin = snapshot.vertices[vertex.id]
+        return origin ? { ...vertex, x: origin.x + dx, y: origin.y + dy } : vertex
+      })
+    : layout.plan.vertices
+  let plan: FloorPlan = {
+    ...layout.plan,
+    fixtures,
+    vertices,
+  }
+  if (movedVertices) plan = refreshPlanGeometry(plan)
+  plan = reattachOrphans(plan, snapshot, dx, dy)
+  return { ...layout, furniture, plan }
+}
+
+export function applyRigidGroupMove(layout: Layout, selections: EditorSelection[], dx: number, dy: number): Layout {
+  const prepared = detachBoundaryVertices(layout, selections)
+  return translateLayoutGroup(prepared, snapshotRigidGroup(prepared, selections), dx, dy)
+}
+
+type ActiveGroupSession = {
+  origin: Point
+  selections: EditorSelection[]
+  bounds: { x: number; y: number; width: number; depth: number } | null
+  snapshot: GroupSnapshot | null
+  prepared: boolean
+}
+
+let activeGroup: ActiveGroupSession | null = null
+
+export function startRigidGroupSession(
+  layout: Layout,
+  selections: EditorSelection[],
+  origin: Point,
+) {
+  activeGroup = {
+    origin,
+    selections: [...selections],
+    bounds: selectionBounds(layout, selections),
+    snapshot: null,
+    prepared: false,
+  }
+}
 
 export function startFreeGroupDrag(
   layout: Layout,
   selections: EditorSelection[],
-  draggedId: string,
+  _draggedId: string,
   originX: number,
   originY: number,
 ) {
-  activeGroup = {
-    snapshot: snapshotFreeGroup(layout, selections),
-    draggedId,
-    originX,
-    originY,
-  }
+  startRigidGroupSession(layout, selections, { x: originX, y: originY })
 }
 
-export function activeGroupDelta(x: number, y: number): { dx: number; dy: number; snapshot: GroupSnapshot } | null {
+export function activeGroupSession(): ActiveGroupSession | null {
+  return activeGroup
+}
+
+export function prepareActiveGroupSnapshot(layout: Layout): { layout: Layout; snapshot: GroupSnapshot } | null {
   if (!activeGroup) return null
-  return {
-    dx: x - activeGroup.originX,
-    dy: y - activeGroup.originY,
-    snapshot: activeGroup.snapshot,
-  }
+  if (activeGroup.snapshot) return { layout, snapshot: activeGroup.snapshot }
+  const prepared = detachBoundaryVertices(layout, activeGroup.selections)
+  const snapshot = snapshotRigidGroup(prepared, activeGroup.selections)
+  activeGroup.snapshot = snapshot
+  activeGroup.prepared = true
+  return { layout: prepared, snapshot }
 }
 
 export function endFreeGroupDrag() {
+  activeGroup = null
+}
+
+export function endRigidGroupDrag() {
   activeGroup = null
 }
 
@@ -73,21 +285,8 @@ export function hasActiveGroupDrag(): boolean {
   return activeGroup !== null
 }
 
-export function translateLayoutGroup(layout: Layout, snapshot: GroupSnapshot, dx: number, dy: number): Layout {
-  return {
-    ...layout,
-    furniture: layout.furniture.map((item) => {
-      const origin = snapshot.furniture[item.id]
-      return origin ? { ...item, x: origin.x + dx, y: origin.y + dy } : item
-    }),
-    plan: {
-      ...layout.plan,
-      fixtures: layout.plan.fixtures.map((fixture) => {
-        const origin = snapshot.fixtures[fixture.id]
-        return origin ? { ...fixture, x: origin.x + dx, y: origin.y + dy } : fixture
-      }),
-    },
-  }
+export function groupDragDidMutate(): boolean {
+  return Boolean(activeGroup?.prepared)
 }
 
 export function selectionBounds(layout: Layout, selections: EditorSelection[]): { x: number; y: number; width: number; depth: number } | null {

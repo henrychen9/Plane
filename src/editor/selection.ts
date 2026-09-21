@@ -2,6 +2,15 @@ import type { EditorSelection, SelectionKind } from '../types/spatial'
 
 export const MOUNTED_KINDS: SelectionKind[] = ['door', 'window', 'outlet', 'switch']
 export const FREE_KINDS: SelectionKind[] = ['furniture', 'fixture']
+export const TANGIBLE_KINDS: SelectionKind[] = [
+  'furniture',
+  'fixture',
+  'wall',
+  'door',
+  'window',
+  'outlet',
+  'switch',
+]
 
 export function sameSelection(a: EditorSelection, b: EditorSelection): boolean {
   return a.kind === b.kind && a.id === b.id
@@ -19,8 +28,33 @@ export function isFreeKind(kind: SelectionKind): boolean {
   return FREE_KINDS.includes(kind)
 }
 
+export function isTangibleKind(kind: SelectionKind): boolean {
+  return TANGIBLE_KINDS.includes(kind)
+}
+
+export function tangibleSelections(selections: EditorSelection[]): EditorSelection[] {
+  return selections.filter((item) => isTangibleKind(item.kind))
+}
+
 export function canGroupTranslate(selections: EditorSelection[]): boolean {
   return selections.length > 0 && selections.every((item) => isFreeKind(item.kind))
+}
+
+export function canRigidGroupDrag(selections: EditorSelection[]): boolean {
+  return tangibleSelections(selections).length > 1
+}
+
+export function freeSelections(selections: EditorSelection[]): EditorSelection[] {
+  return selections.filter((item) => isFreeKind(item.kind))
+}
+
+/** 3D group move: two or more furniture/fixture selections. Architecture in the set is ignored. */
+export function can3DGroupDrag(selections: EditorSelection[]): boolean {
+  return freeSelections(selections).length > 1
+}
+
+export function canNudgeMounted(selections: EditorSelection[]): boolean {
+  return selections.length > 0 && selections.every((item) => isMountedKind(item.kind))
 }
 
 export function hasMountedSelection(selections: EditorSelection[]): boolean {

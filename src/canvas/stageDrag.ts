@@ -2,16 +2,20 @@ import type Konva from 'konva'
 import { pointerToWorld } from './pointer'
 
 export function startStageDrag(stage: Konva.Stage, onMove: () => void, onEnd: () => void) {
-  const move = () => onMove()
-  const end = () => {
-    stage.off('mousemove', move)
-    stage.off('mouseup', end)
-    window.removeEventListener('mouseup', end)
+  const move = (event: PointerEvent) => {
+    stage.setPointersPositions(event)
+    onMove()
+  }
+  const end = (event: PointerEvent) => {
+    stage.setPointersPositions(event)
+    window.removeEventListener('pointermove', move, true)
+    window.removeEventListener('pointerup', end, true)
+    window.removeEventListener('pointercancel', end, true)
     onEnd()
   }
-  stage.on('mousemove', move)
-  stage.on('mouseup', end)
-  window.addEventListener('mouseup', end)
+  window.addEventListener('pointermove', move, true)
+  window.addEventListener('pointerup', end, true)
+  window.addEventListener('pointercancel', end, true)
 }
 
 export function stageWorld(stage: Konva.Stage | null) {

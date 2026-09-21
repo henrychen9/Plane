@@ -1,9 +1,21 @@
 import type { EditorSelection, FloorPlan, FurnitureItem, Point } from '../types/spatial'
 import { pointHitsFurniture } from '../furniture/shapes'
-import { doorGeometry } from './openings'
-import { distance, pointAlongWall, pointInPolygon, projectOnWall } from './geometry'
+import { doorGeometry, windowGeometry } from './openings'
+import { distance, pointAlongWall, pointInPolygon, projectOnWall, wallNormal } from './geometry'
 
 export type Hit = EditorSelection & { dist: number }
+
+function markerHitDistance(point: Point, plan: FloorPlan, wallId: string, offset: number): number | null {
+  const wall = plan.walls.find((item) => item.id === wallId)
+  if (!wall) return null
+  const pos = pointAlongWall(wall, offset)
+  const normal = wallNormal(wall)
+  const visual = {
+    x: pos.x + normal.x * (wall.thickness * 0.5 + 4),
+    y: pos.y + normal.y * (wall.thickness * 0.5 + 4),
+  }
+  return Math.min(distance(point, pos), distance(point, visual))
+}
 
 export function hitsAt(
   point: Point,
@@ -16,18 +28,12 @@ export function hitsAt(
 
   if (layers.electrical) {
     for (const outlet of plan.outlets) {
-      const wall = plan.walls.find((item) => item.id === outlet.wallId)
-      if (!wall) continue
-      const pos = pointAlongWall(wall, outlet.offset)
-      const dist = distance(point, pos)
-      if (dist <= Math.max(threshold, 8)) hits.push({ kind: 'outlet', id: outlet.id, dist })
+      const dist = markerHitDistance(point, plan, outlet.wallId, outlet.offset)
+      if (dist != null && dist <= Math.max(threshold, 12)) hits.push({ kind: 'outlet', id: outlet.id, dist })
     }
     for (const item of plan.switches) {
-      const wall = plan.walls.find((entry) => entry.id === item.wallId)
-      if (!wall) continue
-      const pos = pointAlongWall(wall, item.offset)
-      const dist = distance(point, pos)
-      if (dist <= Math.max(threshold, 8)) hits.push({ kind: 'switch', id: item.id, dist })
+      const dist = markerHitDistance(point, plan, item.wallId, item.offset)
+      if (dist != null && dist <= Math.max(threshold, 12)) hits.push({ kind: 'switch', id: item.id, dist })
     }
   }
 
@@ -48,14 +54,14 @@ export function hitsAt(
       const toSlab = projectOnWall(point, { start: geo.hinge, end: geo.slab }).distance
       const toArc = Math.min(...geo.arc.map((arcPoint) => distance(point, arcPoint)))
       const dist = Math.min(toGap, toSlab, toArc)
-      if (dist <= Math.max(threshold, wall.thickness, 8)) hits.push({ kind: 'door', id: door.id, dist })
+      if (dist <= Math.max(threshold, wall.thickness, 10)) hits.push({ kind: 'door', id: door.id, dist })
     }
     for (const window of plan.windows) {
       const wall = plan.walls.find((item) => item.id === window.wallId)
       if (!wall) continue
-      const mid = pointAlongWall(wall, window.offset + window.width / 2)
-      const dist = distance(point, mid)
-      if (dist <= Math.max(threshold, window.width / 2)) hits.push({ kind: 'window', id: window.id, dist })
+      const geo = windowGeometry(wall, window)
+      const dist = projectOnWall(point, { start: geo.start, end: geo.end }).distance
+      if (dist <= Math.max(threshold, wall.thickness, 10)) hits.push({ kind: 'window', id: window.id, dist })
     }
     for (const fixture of plan.fixtures) {
       if (
@@ -91,13 +97,13 @@ export function hitsAt(
   const rank: Record<Hit['kind'], number> = {
     outlet: 0,
     switch: 0,
+    door: 0,
+    window: 0,
     furniture: 1,
-    door: 2,
-    window: 2,
-    fixture: 3,
-    wall: 4,
-    measurement: 5,
-    room: 6,
+    fixture: 2,
+    wall: 3,
+    measurement: 4,
+    room: 5,
   }
   return hits.sort((a, b) => rank[a.kind] - rank[b.kind] || a.dist - b.dist)
 }
@@ -116,4 +122,14 @@ export function pickTop(
   const index = hits.findIndex((hit) => hit.kind === current.kind && hit.id === current.id)
   if (index === -1) return hits[0]
   return hits[(index + 1) % hits.length]
+}
+
+export function pickMountedAt(point: Point, plan: FloorPlan, threshold: number): Hit | null {
+  const hits = hitsAt(point, plan, [], Math.max(threshold, 10), {
+    architecture: true,
+    furniture: false,
+    electrical: true,
+    measurements: false,
+  })
+  return hits.find((hit) => hit.kind === 'door' || hit.kind === 'window' || hit.kind === 'outlet' || hit.kind === 'switch') ?? null
 }

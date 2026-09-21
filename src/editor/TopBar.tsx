@@ -80,9 +80,7 @@ export function TopBar() {
         <span className="min-w-[64px] text-[12px] text-muted">
           {saveStatus === 'saving' ? 'Saving…' : 'Saved'}
         </span>
-        <span className="rounded-md border border-line bg-white/60 px-2 py-1 text-[11px] font-medium tracking-[0.12em] text-ink-soft">
-          2D
-        </span>
+        <DisplayModeSwitch />
       </div>
       {confirmClear && projectId && layoutId ? (
         <ClearLayoutDialog
@@ -92,6 +90,36 @@ export function TopBar() {
         />
       ) : null}
     </header>
+  )
+}
+
+function DisplayModeSwitch() {
+  const displayMode = useEditorStore((state) => state.displayMode)
+  const setDisplayMode = useEditorStore((state) => state.setDisplayMode)
+
+  return (
+    <div className="flex rounded-md border border-line bg-white/60 p-0.5" role="group" aria-label="View mode">
+      <button
+        type="button"
+        aria-pressed={displayMode === '2d'}
+        onClick={() => setDisplayMode('2d')}
+        className={`h-7 rounded px-2 text-[11px] font-medium tracking-[0.12em] transition ${
+          displayMode === '2d' ? 'bg-white text-ink shadow-[0_1px_2px_rgba(44,42,38,0.08)]' : 'text-ink-soft hover:text-ink'
+        }`}
+      >
+        2D
+      </button>
+      <button
+        type="button"
+        aria-pressed={displayMode === '3d'}
+        onClick={() => setDisplayMode('3d')}
+        className={`h-7 rounded px-2 text-[11px] font-medium tracking-[0.12em] transition ${
+          displayMode === '3d' ? 'bg-white text-ink shadow-[0_1px_2px_rgba(44,42,38,0.08)]' : 'text-ink-soft hover:text-ink'
+        }`}
+      >
+        3D
+      </button>
+    </div>
   )
 }
 
@@ -133,7 +161,7 @@ function ClearLayoutDialog({
   const clearLayout = useProjectStore((state) => state.clearLayout)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10" data-within-panel="true">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/10" data-plane-panel="true">
       <div className="panel w-[22rem] rounded-2xl p-5">
         <p className="font-serif text-[24px] text-ink">Clear this layout?</p>
         <p className="mt-2 text-[13px] leading-5 text-ink-soft">

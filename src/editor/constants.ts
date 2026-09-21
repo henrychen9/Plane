@@ -20,5 +20,21 @@ export const PANEL = {
 
 export const FIT_LABEL_PAD = 40
 
-export const STORAGE_KEY = 'within.projects.v1'
-export const CLIPBOARD_KEY = 'within.clipboard.v1'
+export const STORAGE_KEY = 'plane.projects.v1'
+export const CLIPBOARD_KEY = 'plane.clipboard.v1'
+
+/** Copy pre-rename storage so existing browser data survives the product rename. */
+export function adoptLegacyStorage() {
+  try {
+    if (!localStorage.getItem(STORAGE_KEY)) {
+      const legacy = localStorage.getItem('within.projects.v1')
+      if (legacy) localStorage.setItem(STORAGE_KEY, legacy)
+    }
+    if (!sessionStorage.getItem(CLIPBOARD_KEY)) {
+      const legacy = sessionStorage.getItem('within.clipboard.v1')
+      if (legacy) sessionStorage.setItem(CLIPBOARD_KEY, legacy)
+    }
+  } catch {
+    /* private mode */
+  }
+}

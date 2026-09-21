@@ -10,8 +10,10 @@ import type { FurnitureItem } from '../types/spatial'
 type FurnitureNodeProps = {
   item: FurnitureItem
   dragging: boolean
+  allowNodeDrag?: boolean
   onNode: (id: string, node: Konva.Group | null) => void
   onSelect: (id: string, toggle: boolean, cycle: boolean) => void
+  onGroupDragStart?: (id: string, stage: Konva.Stage | null) => boolean
   onDragStart: (id: string, node: Konva.Group) => boolean | void
   onDragMove: (id: string, node: Konva.Group) => void
   onDragEnd: (id: string, node: Konva.Group) => void
@@ -20,8 +22,10 @@ type FurnitureNodeProps = {
 export const FurnitureNode = memo(function FurnitureNode({
   item,
   dragging,
+  allowNodeDrag,
   onNode,
   onSelect,
+  onGroupDragStart,
   onDragStart,
   onDragMove,
   onDragEnd,
@@ -40,7 +44,7 @@ export const FurnitureNode = memo(function FurnitureNode({
       offsetX={item.width / 2}
       offsetY={item.depth / 2}
       rotation={item.rotation}
-      draggable={!item.locked}
+      draggable={allowNodeDrag ?? !item.locked}
       width={item.width}
       height={item.depth}
       scaleX={1}
@@ -52,6 +56,7 @@ export const FurnitureNode = memo(function FurnitureNode({
       shadowOffsetY={dragging ? 6 : 0}
       onMouseDown={(event) => {
         event.cancelBubble = true
+        if (!event.evt.shiftKey && onGroupDragStart?.(item.id, event.target.getStage())) return
         onSelect(item.id, event.evt.shiftKey, event.evt.metaKey || event.evt.ctrlKey)
       }}
       onTap={() => onSelect(item.id, false, false)}

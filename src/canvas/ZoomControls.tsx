@@ -12,7 +12,7 @@ export function ZoomControls({
   onToggleGrid: () => void
 }) {
   return (
-    <div className="pointer-events-auto absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 min-[1100px]:left-auto min-[1100px]:right-[292px] min-[1100px]:translate-x-0" data-within-panel="true">
+    <div className="pointer-events-auto absolute bottom-6 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 min-[1100px]:left-auto min-[1100px]:right-[292px] min-[1100px]:translate-x-0" data-plane-panel="true">
       <div className="panel flex items-center rounded-xl p-1">
         <ControlButton label="Zoom out" onClick={() => onZoomBy(1 / 1.18)}>
           −

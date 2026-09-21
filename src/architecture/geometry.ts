@@ -59,6 +59,12 @@ export function clampOffsetForOpening(offset: number, width: number, wall: Segme
   return Math.max(inset, Math.min(max, offset))
 }
 
+export function clampOffsetOnWall(offset: number, wall: Segment, inset = 2): number {
+  const len = wallLength(wall)
+  const max = Math.max(inset, len - inset)
+  return Math.max(inset, Math.min(max, offset))
+}
+
 export function distanceToSegment(point: Point, a: Point, b: Point): number {
   return projectOnWall(point, { start: a, end: b }).distance
 }

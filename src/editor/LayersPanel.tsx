@@ -27,7 +27,7 @@ export function LayersPanel() {
   if (!projectId || !layoutId || !layout) return null
 
   return (
-    <div className="pointer-events-auto absolute bottom-6 left-3 z-20" data-within-panel="true">
+    <div className="pointer-events-auto absolute bottom-6 left-3 z-20" data-plane-panel="true">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}

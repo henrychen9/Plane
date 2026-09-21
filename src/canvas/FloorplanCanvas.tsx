@@ -29,8 +29,9 @@ import {
   PIXELS_PER_INCH,
   ROTATION_SNAP,
 } from '../editor/constants'
-import { activeGroupDelta, endFreeGroupDrag, hasActiveGroupDrag, selectionBounds, startFreeGroupDrag, translateLayoutGroup } from '../editor/groupMove'
-import { canGroupTranslate, isSelected, uniqueSelections } from '../editor/selection'
+import { selectionBounds } from '../editor/groupMove'
+import { canRigidGroupDrag, isSelected, uniqueSelections } from '../editor/selection'
+import { beginRigidGroupDrag } from './groupDrag'
 import { useEditorStore } from '../state/editorStore'
 import { useProjectStore } from '../state/projectStore'
 import type { BuildTool, FixtureType, FurnitureItem, Point } from '../types/spatial'
@@ -110,7 +111,6 @@ export function FloorplanCanvas() {
   )
   const updateFurniture = useProjectStore((state) => state.updateFurniture)
   const updatePlan = useProjectStore((state) => state.updatePlan)
-  const patchLayout = useProjectStore((state) => state.patchLayout)
   const addFixture = useProjectStore((state) => state.addFixture)
 
   const room = layout?.room
@@ -379,7 +379,7 @@ export function FloorplanCanvas() {
   return (
     <div
       ref={containerRef}
-      data-within-canvas="true"
+      data-plane-canvas="true"
       className="relative h-full w-full overflow-hidden bg-[#f3efe8]"
       style={{ cursor }}
       onMouseEnter={() => setPointerOverCanvas(true)}
@@ -537,6 +537,10 @@ export function FloorplanCanvas() {
                     key={item.id}
                     item={item}
                     dragging={draggingId === item.id}
+                    allowNodeDrag={
+                      !item.locked &&
+                      !(isSelected(selections, 'furniture', item.id) && canRigidGroupDrag(selections))
+                    }
                     onNode={(id, node) => {
                       if (node) nodesRef.current[id] = node
                       else delete nodesRef.current[id]
@@ -561,36 +565,27 @@ export function FloorplanCanvas() {
                           return
                         }
                       }
+                      if (isSelected(useEditorStore.getState().selections, 'furniture', id) && canRigidGroupDrag(useEditorStore.getState().selections)) {
+                        return
+                      }
                       setSelection({ kind: 'furniture', id })
                     }}
-                    onDragStart={(id, node) => {
+                    onGroupDragStart={(id, stage) => {
                       const editor = useEditorStore.getState()
-                      const current = furniture.find((entry) => entry.id === id)
-                      const selected = isSelected(editor.selections, 'furniture', id)
-                      if (editor.selections.length > 1 && selected && !canGroupTranslate(editor.selections)) {
-                        editor.setHoverHint('Some selected items are wall-mounted.')
+                      if (!isSelected(editor.selections, 'furniture', id) || !canRigidGroupDrag(editor.selections)) {
                         return false
                       }
-                      if (!(editor.selections.length > 1 && selected)) {
-                        setSelection({ kind: 'furniture', id })
-                      }
+                      return beginRigidGroupDrag({ projectId, layoutId, stage })
+                    }}
+                    onDragStart={(id, node) => {
+                      const current = furniture.find((entry) => entry.id === id)
                       captureHistory()
                       setDraggingId(id)
-                      if (layout && editor.selections.length > 1 && selected && canGroupTranslate(editor.selections) && current) {
-                        startFreeGroupDrag(layout, editor.selections, id, current.x, current.y)
-                      }
                       node.position({ x: current ? current.x + current.width / 2 : node.x(), y: current ? current.y + current.depth / 2 : node.y() })
                     }}
                     onDragMove={(id, node) => {
                       const current = furniture.find((entry) => entry.id === id)
                       if (!current || !plan) return
-                      const group = activeGroupDelta(node.x() - current.width / 2, node.y() - current.depth / 2)
-                      if (group) {
-                        patchLayout(projectId, layoutId, (item) => translateLayoutGroup(item, group.snapshot, group.dx, group.dy), {
-                          rebuild: false,
-                        })
-                        return
-                      }
                       const next = applyNodePosition(current, node, furniture, plan, room!, zoom, altHeld)
                       node.position({
                         x: next.x + current.width / 2,
@@ -601,9 +596,7 @@ export function FloorplanCanvas() {
                     }}
                     onDragEnd={(id, node) => {
                       const current = furniture.find((entry) => entry.id === id)
-                      const grouped = hasActiveGroupDrag()
-                      endFreeGroupDrag()
-                      if (!grouped && current && plan) {
+                      if (current && plan) {
                         const next = applyNodePosition(current, node, furniture, plan, room!, zoom, altHeld)
                         updateFurniture(projectId, layoutId, id, { x: next.x, y: next.y })
                       }
@@ -617,7 +610,6 @@ export function FloorplanCanvas() {
               projectId={projectId}
               layoutId={layoutId}
               plan={plan}
-              furniture={furniture}
               scale={scale}
             />
             <DraftOverlay scale={scale} plan={plan} />
@@ -640,7 +632,9 @@ export function FloorplanCanvas() {
             <Transformer
               ref={trRef}
               keepRatio={shiftHeld || selectedShape === 'circle'}
+              rotateEnabled={Boolean(selectedFurniture && !selectedFurniture.locked)}
               rotateAnchorOffset={26 / scale}
+              rotateAnchorCursor="grab"
               anchorSize={Math.max(5 / scale, 3.4)}
               anchorCornerRadius={0.8 / scale}
               borderStroke="#2c2a26"
@@ -648,7 +642,6 @@ export function FloorplanCanvas() {
               borderDash={[]}
               anchorStroke="#2c2a26"
               anchorFill="#fffdf9"
-              rotateAnchorCursor="grab"
               rotationSnaps={Array.from({ length: 24 }, (_, index) => index * ROTATION_SNAP)}
               boundBoxFunc={(oldBox, newBox) => {
                 const min = MIN_FURNITURE_SIZE * scale
@@ -707,7 +700,7 @@ export function FloorplanCanvas() {
         </div>
       ) : null}
       {calibratePrompt && plan && projectId && layoutId ? (
-        <div className="panel pointer-events-auto absolute left-1/2 top-24 z-40 w-72 -translate-x-1/2 rounded-xl p-4" data-within-panel="true">
+        <div className="panel pointer-events-auto absolute left-1/2 top-24 z-40 w-72 -translate-x-1/2 rounded-xl p-4" data-plane-panel="true">
           <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted">Calibrate scale</p>
           <p className="mt-2 text-[13px] text-ink-soft">Known distance between the two points</p>
           <input

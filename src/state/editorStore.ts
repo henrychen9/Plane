@@ -16,7 +16,9 @@ import { clone } from '../utils/geometry'
 import { getLayout, useProjectStore } from './projectStore'
 
 export type AppView = 'spaces' | 'editor'
+export type DisplayMode = '2d' | '3d'
 export type LibraryTab = 'build' | 'furniture'
+export type CameraMode = 'orbit' | 'top' | 'walk'
 
 export const DEFAULT_LAYERS: Record<LayerId, boolean> = {
   architecture: true,
@@ -48,6 +50,8 @@ export type WallDeletePrompt = {
 
 type EditorState = {
   view: AppView
+  displayMode: DisplayMode
+  cameraMode: CameraMode
   projectId: string | null
   layoutId: string | null
   selection: EditorSelection | null
@@ -83,12 +87,17 @@ type EditorState = {
   past: LayoutSnapshot[]
   future: LayoutSnapshot[]
   fitNonce: number
+  threeFitNonce: number
   libraryDrag: { type: string; clientX: number; clientY: number } | null
+  setDisplayMode: (mode: DisplayMode) => void
+  setCameraMode: (mode: CameraMode) => void
   openSpaces: () => void
   openProject: (projectId: string, layoutId?: string) => void
   setLayoutId: (layoutId: string) => void
   setSelection: (selection: EditorSelection | null) => void
   setSelections: (selections: EditorSelection[]) => void
+  selectOnly: (selection: EditorSelection) => void
+  toggleSelection: (selection: EditorSelection) => void
   selectObject: (selection: EditorSelection, additive?: boolean) => void
   setMarquee: (marquee: EditorState['marquee']) => void
   setClipboard: (clipboard: ClipboardPayload | null) => void
@@ -119,6 +128,7 @@ type EditorState = {
   setHoverHint: (hint: string | null) => void
   cancelTool: () => void
   requestFit: () => void
+  requestThreeFit: () => void
   setLibraryDrag: (drag: EditorState['libraryDrag']) => void
   captureHistory: () => void
   undo: () => void
@@ -167,6 +177,8 @@ const selectionReset = {
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   view: 'spaces',
+  displayMode: '2d',
+  cameraMode: 'orbit',
   projectId: null,
   layoutId: null,
   selection: null,
@@ -202,11 +214,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   past: [],
   future: [],
   fitNonce: 0,
+  threeFitNonce: 0,
   libraryDrag: null,
+
+  setDisplayMode: (mode) => set({ displayMode: mode, libraryDrag: null, cameraMode: 'orbit' }),
+  setCameraMode: (mode) => set({ cameraMode: mode, draggingId: null }),
 
   openSpaces: () =>
     set({
       view: 'spaces',
+      displayMode: '2d',
+      cameraMode: 'orbit',
       projectId: null,
       layoutId: null,
       ...selectionReset,
@@ -228,6 +246,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const nextLayoutId = layoutId ?? project?.layouts[0]?.id ?? null
     set({
       view: 'editor',
+      displayMode: '2d',
+      cameraMode: 'orbit',
       projectId,
       layoutId: nextLayoutId,
       ...selectionReset,
@@ -248,6 +268,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setLayoutId: (layoutId) =>
     set({
       layoutId,
+      cameraMode: 'orbit',
       ...selectionReset,
       tool: 'select',
       ...toolResets,
@@ -276,11 +297,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       contextMenu: null,
     })
   },
-  selectObject: (item, additive = false) => {
-    if (!additive) {
-      set({ selection: item, selections: [item], layoutMenuOpen: false, contextMenu: null })
-      return
-    }
+  selectOnly: (item) =>
+    set({ selection: item, selections: [item], layoutMenuOpen: false, contextMenu: null }),
+  toggleSelection: (item) => {
     const current = get().selections
     const exists = current.some((entry) => sameSelection(entry, item))
     const next = uniqueSelections(exists ? current.filter((entry) => !sameSelection(entry, item)) : [...current, item])
@@ -290,6 +309,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       layoutMenuOpen: false,
       contextMenu: null,
     })
+  },
+  selectObject: (item, additive = false) => {
+    if (additive) get().toggleSelection(item)
+    else get().selectOnly(item)
   },
   setMarquee: (marquee) => set({ marquee }),
   setClipboard: (clipboard) => {
@@ -362,6 +385,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (selection || selections.length > 0) set({ ...selectionReset, contextMenu: null })
   },
   requestFit: () => set({ fitNonce: get().fitNonce + 1 }),
+  requestThreeFit: () => set({ threeFitNonce: get().threeFitNonce + 1 }),
   setLibraryDrag: (drag) => set({ libraryDrag: drag }),
 
   captureHistory: () => {

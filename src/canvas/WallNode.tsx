@@ -1,6 +1,8 @@
 import { memo } from 'react'
+import type Konva from 'konva'
 import { Group, Line, Text } from 'react-konva'
 import { projectOnWall, wallLength, wallNormal } from '../architecture/geometry'
+import { pickMountedAt } from '../architecture/pick'
 import { splitWallAt, translateWall } from '../architecture/plan'
 import { wallHasSharedEndpoints } from '../architecture/vertices'
 import { wallPolygon } from '../architecture/wallPolygons'
@@ -8,6 +10,9 @@ import { useEditorStore } from '../state/editorStore'
 import { useProjectStore } from '../state/projectStore'
 import type { FloorPlan, Wall } from '../types/spatial'
 import { formatLength } from '../utils/units'
+import { beginRigidGroupDrag, canRigidGroupDrag, hasActiveGroupDrag } from './groupDrag'
+import { beginMountedDrag } from './mountedDrag'
+import { pointerToWorld } from './pointer'
 
 export const WallNode = memo(function WallNode({
   projectId,
@@ -30,6 +35,7 @@ export const WallNode = memo(function WallNode({
 }) {
   const inv = 1 / scale
   const draggingOpeningId = useEditorStore((state) => state.draggingOpeningId)
+  const selections = useEditorStore((state) => state.selections)
   const setContextMenu = useEditorStore((state) => state.setContextMenu)
   const captureHistory = useEditorStore((state) => state.captureHistory)
   const selectObject = useEditorStore((state) => state.selectObject)
@@ -43,13 +49,50 @@ export const WallNode = memo(function WallNode({
     y: mid.y + normal.y * (wall.thickness * 0.7 + 6 * inv),
   }
   const shared = wallHasSharedEndpoints(plan, wall)
+  const inRigidGroup = selected && canRigidGroupDrag(selections)
   const openingHost =
     plan.doors.some((item) => item.id === draggingOpeningId && item.wallId === wall.id) ||
     plan.windows.some((item) => item.id === draggingOpeningId && item.wallId === wall.id)
   const highlighted = selected || openingHost
-  const bodyDraggable = interactive && !locked && !shared
+  const bodyDraggable = interactive && !locked && !shared && !inRigidGroup
 
   const select = (additive = false) => selectObject({ kind: 'wall', id: wall.id }, additive)
+
+  const takeMountedIfHit = (event: Konva.KonvaEventObject<MouseEvent>) => {
+    if (!interactive) return false
+    const stage = event.target.getStage()
+    const world = stage ? pointerToWorld(stage, event.evt) : null
+    if (!world) return false
+    const mounted = pickMountedAt(world, plan, Math.max(10, wall.thickness))
+    if (!mounted) return false
+    event.cancelBubble = true
+    event.target.stopDrag()
+    beginMountedDrag({
+      projectId,
+      layoutId,
+      kind: mounted.kind,
+      id: mounted.id,
+      stage,
+      additive: event.evt.shiftKey,
+      locked,
+    })
+    return true
+  }
+
+  const onBodyMouseDown = (event: Konva.KonvaEventObject<MouseEvent>) => {
+    if (takeMountedIfHit(event)) return
+    if (!interactive) return
+    event.cancelBubble = true
+    if (event.evt.shiftKey) {
+      select(true)
+      return
+    }
+    if (inRigidGroup) {
+      beginRigidGroupDrag({ projectId, layoutId, stage: event.target.getStage() })
+      return
+    }
+    select()
+  }
 
   return (
     <Group>
@@ -60,13 +103,9 @@ export const WallNode = memo(function WallNode({
           fill={highlighted ? '#2c2a26' : '#3f3c37'}
           strokeEnabled={false}
           perfectDrawEnabled={false}
-          onMouseDown={(event) => {
-            if (!interactive) return
-            event.cancelBubble = true
-            select(event.evt.shiftKey)
-          }}
+          onMouseDown={onBodyMouseDown}
           onDblClick={(event) => {
-            if (!interactive || locked) return
+            if (!interactive || locked || inRigidGroup) return
             const stage = event.target.getStage()
             const pointer = stage?.getPointerPosition()
             if (!stage || !pointer) return
@@ -96,11 +135,20 @@ export const WallNode = memo(function WallNode({
           }}
           draggable={bodyDraggable}
           onDragStart={(event) => {
+            if (useEditorStore.getState().draggingOpeningId || hasActiveGroupDrag() || inRigidGroup) {
+              event.target.stopDrag()
+              event.target.position({ x: 0, y: 0 })
+              return
+            }
             event.cancelBubble = true
             captureHistory()
             if (!event.evt.shiftKey) select()
           }}
           onDragMove={(event) => {
+            if (hasActiveGroupDrag() || inRigidGroup) {
+              event.target.position({ x: 0, y: 0 })
+              return
+            }
             const node = event.target
             updatePlan(projectId, layoutId, (current) => translateWall(current, wall.id, node.x(), node.y()), {
               rebuild: false,
@@ -119,11 +167,7 @@ export const WallNode = memo(function WallNode({
           lineCap="butt"
           lineJoin="miter"
           miterLimit={4}
-          onMouseDown={(event) => {
-            if (!interactive) return
-            event.cancelBubble = true
-            select(event.evt.shiftKey)
-          }}
+          onMouseDown={onBodyMouseDown}
         />
       )}
       {showLength ? (

@@ -13,10 +13,12 @@ import {
 } from '../architecture/plan'
 import { refreshPlanGeometry } from '../architecture/vertices'
 import { createChicagoStudio, emptyLayout, furnitureFromCatalog, nextLayoutName } from '../data/sample'
-import { DUPLICATE_OFFSET, STORAGE_KEY } from '../editor/constants'
+import { adoptLegacyStorage, DUPLICATE_OFFSET, STORAGE_KEY } from '../editor/constants'
 import type { Fixture, FloorPlan, FurnitureItem, Layout, Project, Room } from '../types/spatial'
 import { clone } from '../utils/geometry'
 import { createId } from '../utils/id'
+
+adoptLegacyStorage()
 
 export type SaveStatus = 'saved' | 'saving'
 

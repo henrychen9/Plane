@@ -2,6 +2,7 @@ import { clientToWorld } from '../canvas/coords'
 import { DUPLICATE_OFFSET } from './constants'
 import type { ClipboardPayload } from './clipboardModel'
 import {
+  applyRigidGroupMove,
   collectCopiedItems,
   removeSelectionsFromLayout,
   selectionBounds,
@@ -9,12 +10,13 @@ import {
   translateLayoutGroup,
   type CopiedArchitecture,
 } from './groupMove'
-import { canGroupTranslate, uniqueSelections } from './selection'
+import { canGroupTranslate, canNudgeMounted, canRigidGroupDrag, uniqueSelections } from './selection'
 import { useEditorStore } from '../state/editorStore'
 import { getLayout, useProjectStore } from '../state/projectStore'
 import type { EditorSelection, Point } from '../types/spatial'
 import { clone } from '../utils/geometry'
 import { createId } from '../utils/id'
+import { arrowAlongWall, nudgeMountedPlan } from '../architecture/mountedMove'
 
 export type { ClipboardPayload } from './clipboardModel'
 
@@ -169,7 +171,7 @@ function pasteOrigin(payload: ClipboardPayload): Point {
     y: point.y - payload.bounds.depth / 2 + offset,
   })
   if (editor.pointerOverCanvas && editor.pointerWorld) return centerOn(editor.pointerWorld)
-  const canvas = document.querySelector('[data-within-canvas]')
+  const canvas = document.querySelector('[data-plane-canvas]')
   if (canvas) {
     const rect = canvas.getBoundingClientRect()
     const world = clientToWorld(rect.left + rect.width / 2, rect.top + rect.height / 2, rect, editor.pan, editor.zoom)
@@ -289,6 +291,28 @@ export function nudgeSelection(dx: number, dy: number): boolean {
   const ctx = currentLayout()
   if (!ctx) return false
   const selections = activeSelections()
+  if (canRigidGroupDrag(selections)) {
+    useEditorStore.getState().captureHistory()
+    useProjectStore.getState().patchLayout(
+      ctx.projectId,
+      ctx.layoutId,
+      (layout) => applyRigidGroupMove(layout, selections, dx, dy),
+    )
+    return true
+  }
+  if (canNudgeMounted(selections)) {
+    if (ctx.layout.plan.architectureLocked) return false
+    const along = arrowAlongWall(dx, dy)
+    if (along === 0) return false
+    useEditorStore.getState().captureHistory()
+    useProjectStore.getState().updatePlan(
+      ctx.projectId,
+      ctx.layoutId,
+      (plan) => nudgeMountedPlan(plan, selections, along),
+      { rebuild: false },
+    )
+    return true
+  }
   if (!canGroupTranslate(selections) && selections.some((item) => item.kind !== 'furniture' && item.kind !== 'fixture')) {
     if (!selections.some((item) => item.kind === 'furniture' || item.kind === 'fixture')) return false
   }

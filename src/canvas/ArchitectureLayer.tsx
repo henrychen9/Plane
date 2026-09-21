@@ -1,13 +1,11 @@
-import { memo, useMemo } from 'react'
+import { memo } from 'react'
 import { Circle, Group, Line, Text } from 'react-konva'
-import { furnitureCollisions } from '../architecture/collision'
-import { furnitureAABB } from '../utils/geometry'
 import { pointAlongWall, polygonCentroid } from '../architecture/geometry'
 import { nearestWall } from '../architecture/plan'
 import { cornerHubs } from '../architecture/wallPolygons'
-import { isSelected } from '../editor/selection'
+import { isSelected, canRigidGroupDrag } from '../editor/selection'
 import { useEditorStore } from '../state/editorStore'
-import type { FloorPlan, FurnitureItem } from '../types/spatial'
+import type { FloorPlan } from '../types/spatial'
 import { FixtureNode } from './FixtureNode'
 import { DoorNode, MarkerNode, MeasureLine, WindowNode } from './OpeningNodes'
 import { WallNode } from './WallNode'
@@ -115,7 +113,7 @@ export const ArchitectureLayer = memo(function ArchitectureLayer({
           ))
         : null}
 
-      {showArch && selectedWallIds.length > 0
+      {showArch && selectedWallIds.length > 0 && !canRigidGroupDrag(selections)
         ? selectedWallIds.map((wallId) => (
             <VertexHandles
               key={`verts-${wallId}`}
@@ -139,7 +137,7 @@ export const ArchitectureLayer = memo(function ArchitectureLayer({
               plan={plan}
               selected={isSelected(selections, 'fixture', fixture.id)}
               interactive={interactive}
-              locked={locked || fixture.locked}
+              locked={locked}
               scale={scale}
             />
           ))
@@ -152,13 +150,11 @@ export const OverlayLayer = memo(function OverlayLayer({
   projectId,
   layoutId,
   plan,
-  furniture,
   scale,
 }: {
   projectId: string
   layoutId: string
   plan: FloorPlan
-  furniture: FurnitureItem[]
   scale: number
 }) {
   const tool = useEditorStore((state) => state.tool)
@@ -168,12 +164,6 @@ export const OverlayLayer = memo(function OverlayLayer({
   const inv = 1 / scale
   const interactive = tool === 'select'
   const locked = Boolean(plan.architectureLocked)
-  const collisions = useMemo(() => {
-    const map: Record<string, ReturnType<typeof furnitureCollisions>> = {}
-    if (!layers.furniture) return map
-    for (const item of furniture) map[item.id] = furnitureCollisions(item, plan)
-    return map
-  }, [furniture, layers.furniture, plan])
 
   return (
     <Group listening={interactive}>
@@ -249,25 +239,6 @@ export const OverlayLayer = memo(function OverlayLayer({
               onSelect={() => setSelection({ kind: 'measurement', id: item.id })}
             />
           ))
-        : null}
-      {layers.furniture
-        ? furniture.map((item) => {
-            const hits = collisions[item.id] ?? []
-            if (hits.length === 0) return null
-            const box = furnitureAABB(item)
-            return (
-              <Group key={`warn-${item.id}`} listening={false}>
-                <Circle
-                  x={box.x + box.width}
-                  y={box.y}
-                  radius={3.2 * inv}
-                  fill="#d8cfc2"
-                  stroke="#8d877e"
-                  strokeWidth={0.8 * inv}
-                />
-              </Group>
-            )
-          })
         : null}
       <HoverMark plan={plan} scale={scale} />
     </Group>

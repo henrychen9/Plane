@@ -1,15 +1,14 @@
-import type Konva from 'konva'
 import { Circle, Group, Line, Rect, Text } from 'react-konva'
-import { clampOffsetForOpening, pointAlongWall, projectOnWall, wallAngle, wallLength, wallNormal } from '../architecture/geometry'
+import { pointAlongWall, wallAngle, wallLength, wallNormal } from '../architecture/geometry'
 import { doorGeometry, windowGeometry } from '../architecture/openings'
 import { useEditorStore } from '../state/editorStore'
-import { getLayout, useProjectStore } from '../state/projectStore'
-import type { Door, FloorPlan, Outlet, Point, SwitchDevice, Wall, WindowOpening } from '../types/spatial'
+import type { Door, FloorPlan, Outlet, Point, SwitchDevice, WindowOpening } from '../types/spatial'
 import { formatLength } from '../utils/units'
-import { startStageDrag, stageWorld } from './stageDrag'
+import { beginMountedDrag } from './mountedDrag'
 
-function currentWall(projectId: string, layoutId: string, wallId: string, fallback: Wall): Wall {
-  return getLayout(projectId, layoutId)?.plan.walls.find((item) => item.id === wallId) ?? fallback
+function hitWidth(scale: number, thickness: number) {
+  const inv = 1 / scale
+  return Math.max(thickness + 6, 12, 16 * inv)
 }
 
 export function DoorNode({
@@ -32,12 +31,8 @@ export function DoorNode({
   scale: number
 }) {
   const wall = plan.walls.find((item) => item.id === door.wallId)
-  const selectObject = useEditorStore((state) => state.selectObject)
   const setContextMenu = useEditorStore((state) => state.setContextMenu)
-  const captureHistory = useEditorStore((state) => state.captureHistory)
-  const setDraggingOpeningId = useEditorStore((state) => state.setDraggingOpeningId)
   const draggingOpeningId = useEditorStore((state) => state.draggingOpeningId)
-  const updatePlan = useProjectStore((state) => state.updatePlan)
   if (!wall) return null
   const inv = 1 / scale
   const geo = doorGeometry(wall, door)
@@ -47,49 +42,29 @@ export function DoorNode({
   const distStart = door.offset
   const distEnd = wallLength(wall) - door.offset - door.width
   const nearest = Math.min(distStart, distEnd)
-
-  const select = (additive = false) => selectObject({ kind: 'door', id: door.id }, additive)
-
-  const beginDrag = (stage: Konva.Stage | null) => {
-    if (!interactive || locked || !stage) return
-    captureHistory()
-    setDraggingOpeningId(door.id)
-    select()
-    startStageDrag(
-      stage,
-      () => {
-        const world = stageWorld(stage)
-        if (!world) return
-        const liveWall = currentWall(projectId, layoutId, door.wallId, wall)
-        const hit = projectOnWall(world, liveWall)
-        const offset = clampOffsetForOpening(hit.offset - door.width / 2, door.width, liveWall)
-        updatePlan(
-          projectId,
-          layoutId,
-          (current) => ({
-            ...current,
-            doors: current.doors.map((item) => (item.id === door.id ? { ...item, offset } : item)),
-          }),
-          { rebuild: false },
-        )
-      },
-      () => setDraggingOpeningId(null),
-    )
-  }
+  const pad = hitWidth(scale, wall.thickness)
+  const sector = [geo.hinge.x, geo.hinge.y, ...geo.arc.flatMap((point) => [point.x, point.y])]
 
   return (
     <Group
       onMouseDown={(event) => {
         if (!interactive) return
         event.cancelBubble = true
-        select(event.evt.shiftKey)
-        if (event.evt.button !== 0 || event.evt.shiftKey) return
-        beginDrag(event.target.getStage())
+        if (event.evt.button !== 0) return
+        beginMountedDrag({
+          projectId,
+          layoutId,
+          kind: 'door',
+          id: door.id,
+          stage: event.target.getStage(),
+          additive: event.evt.shiftKey,
+          locked,
+        })
       }}
       onContextMenu={(event) => {
         event.evt.preventDefault()
         event.cancelBubble = true
-        select()
+        useEditorStore.getState().selectObject({ kind: 'door', id: door.id })
         setContextMenu({
           clientX: event.evt.clientX,
           clientY: event.evt.clientY,
@@ -102,7 +77,8 @@ export function DoorNode({
         points={[geo.gapStart.x, geo.gapStart.y, geo.gapEnd.x, geo.gapEnd.y]}
         stroke="#ece6db"
         strokeWidth={wall.thickness + 0.4}
-        hitStrokeWidth={Math.max(wall.thickness + 8 * inv, 14 * inv)}
+        hitStrokeWidth={pad}
+        listening={false}
       />
       {door.type === 'hinged' ? (
         <>
@@ -110,14 +86,14 @@ export function DoorNode({
             points={[geo.hinge.x, geo.hinge.y, geo.slab.x, geo.slab.y]}
             stroke={color}
             strokeWidth={selected ? 1.45 * inv : 1.15 * inv}
-            hitStrokeWidth={10 * inv}
+            listening={false}
           />
           <Line
             points={geo.arc.flatMap((point) => [point.x, point.y])}
             stroke={color}
             strokeWidth={selected ? 1.15 * inv : 0.9 * inv}
             dash={[2.4 * inv, 1.8 * inv]}
-            hitStrokeWidth={10 * inv}
+            listening={false}
           />
         </>
       ) : (
@@ -126,9 +102,18 @@ export function DoorNode({
           stroke={color}
           strokeWidth={1.2 * inv}
           dash={door.type === 'pocket' ? [3 * inv, 2 * inv] : undefined}
-          hitStrokeWidth={10 * inv}
+          listening={false}
         />
       )}
+      <Line
+        points={[geo.gapStart.x, geo.gapStart.y, geo.gapEnd.x, geo.gapEnd.y]}
+        stroke="transparent"
+        strokeWidth={pad}
+        hitStrokeWidth={pad}
+      />
+      {door.type === 'hinged' && sector.length >= 6 ? (
+        <Line points={sector} closed fill="rgba(0,0,0,0.01)" strokeEnabled={false} />
+      ) : null}
       {selected ? (
         <Circle x={geo.hinge.x} y={geo.hinge.y} radius={2.4 * inv} fill="#2c2a26" listening={false} />
       ) : null}
@@ -169,55 +154,34 @@ export function WindowNode({
   scale: number
 }) {
   const wall = plan.walls.find((item) => item.id === window.wallId)
-  const selectObject = useEditorStore((state) => state.selectObject)
   const setContextMenu = useEditorStore((state) => state.setContextMenu)
-  const captureHistory = useEditorStore((state) => state.captureHistory)
-  const setDraggingOpeningId = useEditorStore((state) => state.setDraggingOpeningId)
-  const updatePlan = useProjectStore((state) => state.updatePlan)
   if (!wall) return null
   const inv = 1 / scale
   const geo = windowGeometry(wall, window)
   const mid = { x: (geo.start.x + geo.end.x) / 2, y: (geo.start.y + geo.end.y) / 2 }
   const color = selected ? '#2c2a26' : '#6a655e'
-
-  const select = (additive = false) => selectObject({ kind: 'window', id: window.id }, additive)
+  const pad = hitWidth(scale, wall.thickness)
 
   return (
     <Group
       onMouseDown={(event) => {
         if (!interactive) return
         event.cancelBubble = true
-        select(event.evt.shiftKey)
-        if (locked || event.evt.button !== 0 || event.evt.shiftKey) return
-        const stage = event.target.getStage()
-        if (!stage) return
-        captureHistory()
-        setDraggingOpeningId(window.id)
-        startStageDrag(
-          stage,
-          () => {
-            const world = stageWorld(stage)
-            if (!world) return
-            const liveWall = currentWall(projectId, layoutId, window.wallId, wall)
-            const hit = projectOnWall(world, liveWall)
-            const offset = clampOffsetForOpening(hit.offset - window.width / 2, window.width, liveWall)
-            updatePlan(
-              projectId,
-              layoutId,
-              (current) => ({
-                ...current,
-                windows: current.windows.map((item) => (item.id === window.id ? { ...item, offset } : item)),
-              }),
-              { rebuild: false },
-            )
-          },
-          () => setDraggingOpeningId(null),
-        )
+        if (event.evt.button !== 0) return
+        beginMountedDrag({
+          projectId,
+          layoutId,
+          kind: 'window',
+          id: window.id,
+          stage: event.target.getStage(),
+          additive: event.evt.shiftKey,
+          locked,
+        })
       }}
       onContextMenu={(event) => {
         event.evt.preventDefault()
         event.cancelBubble = true
-        select()
+        useEditorStore.getState().selectObject({ kind: 'window', id: window.id })
         setContextMenu({
           clientX: event.evt.clientX,
           clientY: event.evt.clientY,
@@ -230,25 +194,31 @@ export function WindowNode({
         points={[geo.start.x, geo.start.y, geo.end.x, geo.end.y]}
         stroke="#ece6db"
         strokeWidth={wall.thickness + 0.4}
-        hitStrokeWidth={Math.max(wall.thickness + 8 * inv, 14 * inv)}
+        listening={false}
       />
       <Line
         points={[geo.inner[0].x, geo.inner[0].y, geo.inner[1].x, geo.inner[1].y]}
         stroke={color}
         strokeWidth={1 * inv}
-        hitStrokeWidth={8 * inv}
+        listening={false}
       />
       <Line
         points={[geo.outer[0].x, geo.outer[0].y, geo.outer[1].x, geo.outer[1].y]}
         stroke={color}
         strokeWidth={1 * inv}
-        hitStrokeWidth={8 * inv}
+        listening={false}
       />
       <Line
         points={[geo.start.x, geo.start.y, geo.end.x, geo.end.y]}
         stroke={color}
         strokeWidth={selected ? 1 * inv : 0.7 * inv}
-        hitStrokeWidth={8 * inv}
+        listening={false}
+      />
+      <Line
+        points={[geo.start.x, geo.start.y, geo.end.x, geo.end.y]}
+        stroke="transparent"
+        strokeWidth={pad}
+        hitStrokeWidth={pad}
       />
     </Group>
   )
@@ -276,10 +246,7 @@ export function MarkerNode({
   scale: number
 }) {
   const wall = plan.walls.find((entry) => entry.id === item.wallId)
-  const selectObject = useEditorStore((state) => state.selectObject)
   const setContextMenu = useEditorStore((state) => state.setContextMenu)
-  const captureHistory = useEditorStore((state) => state.captureHistory)
-  const updatePlan = useProjectStore((state) => state.updatePlan)
   if (!wall) return null
   const inv = 1 / scale
   const pos = pointAlongWall(wall, item.offset)
@@ -288,8 +255,7 @@ export function MarkerNode({
     x: pos.x + normal.x * (wall.thickness * 0.5 + 3.2 * inv),
     y: pos.y + normal.y * (wall.thickness * 0.5 + 3.2 * inv),
   }
-
-  const select = (additive = false) => selectObject({ kind, id: item.id }, additive)
+  const radius = Math.max(8, 14 * inv)
 
   return (
     <Group
@@ -299,36 +265,21 @@ export function MarkerNode({
       onMouseDown={(event) => {
         if (!interactive) return
         event.cancelBubble = true
-        select(event.evt.shiftKey)
-        if (locked || event.evt.button !== 0 || event.evt.shiftKey) return
-        const stage = event.target.getStage()
-        if (!stage) return
-        captureHistory()
-        startStageDrag(
-          stage,
-          () => {
-            const world = stageWorld(stage)
-            if (!world) return
-            const liveWall = currentWall(projectId, layoutId, item.wallId, wall)
-            const hit = projectOnWall(world, liveWall)
-            const offset = Math.max(2, Math.min(wallLength(liveWall) - 2, hit.offset))
-            updatePlan(
-              projectId,
-              layoutId,
-              (current) =>
-                kind === 'outlet'
-                  ? { ...current, outlets: current.outlets.map((entry) => (entry.id === item.id ? { ...entry, offset } : entry)) }
-                  : { ...current, switches: current.switches.map((entry) => (entry.id === item.id ? { ...entry, offset } : entry)) },
-              { rebuild: false },
-            )
-          },
-          () => undefined,
-        )
+        if (event.evt.button !== 0) return
+        beginMountedDrag({
+          projectId,
+          layoutId,
+          kind,
+          id: item.id,
+          stage: event.target.getStage(),
+          additive: event.evt.shiftKey,
+          locked,
+        })
       }}
       onContextMenu={(event) => {
         event.evt.preventDefault()
         event.cancelBubble = true
-        select()
+        useEditorStore.getState().selectObject({ kind, id: item.id })
         setContextMenu({
           clientX: event.evt.clientX,
           clientY: event.evt.clientY,
@@ -337,6 +288,7 @@ export function MarkerNode({
         })
       }}
     >
+      <Circle radius={radius} fill="rgba(0,0,0,0.01)" />
       {kind === 'outlet' ? (
         <>
           <Circle radius={2.6 * inv} fill="#f7f4ef" stroke={selected ? '#2c2a26' : '#5c5852'} strokeWidth={0.9 * inv} />

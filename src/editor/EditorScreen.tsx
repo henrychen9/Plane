@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { FloorplanCanvas } from '../canvas/FloorplanCanvas'
 import { getCatalogItem } from '../catalog/furniture'
 import { FurnitureSvg } from '../furniture/FurnitureVisual'
@@ -10,11 +10,15 @@ import { ContextMenu, DeleteWallDialog } from './ContextMenu'
 import { LayersPanel } from './LayersPanel'
 import { dropCatalogItem, useEditorHotkeys } from './useEditorHotkeys'
 
+const ThreeDView = lazy(() => import('../three/ThreeDView'))
+
 export function EditorScreen() {
   useEditorHotkeys()
+  const displayMode = useEditorStore((state) => state.displayMode)
   const libraryDrag = useEditorStore((state) => state.libraryDrag)
   const setLibraryDrag = useEditorStore((state) => state.setLibraryDrag)
   const dragTypeRef = useRef<string | null>(null)
+  const is3d = displayMode === '3d'
 
   useEffect(() => {
     dragTypeRef.current = libraryDrag?.type ?? null
@@ -22,6 +26,7 @@ export function EditorScreen() {
 
   useEffect(() => {
     const onUp = (event: PointerEvent) => {
+      if (useEditorStore.getState().displayMode === '3d') return
       const type = dragTypeRef.current
       if (!type) return
       dropCatalogItem(type, event.clientX, event.clientY)
@@ -33,20 +38,31 @@ export function EditorScreen() {
 
   return (
     <div className="relative h-full w-full overflow-hidden">
-      <FloorplanCanvas />
-      <div data-within-panel="true">
+      <div className={`absolute inset-0 ${is3d ? 'invisible pointer-events-none' : ''}`}>
+        <FloorplanCanvas />
+      </div>
+      {is3d ? (
+        <Suspense fallback={<div className="absolute inset-0 bg-[#f1ece4]" />}>
+          <ThreeDView />
+        </Suspense>
+      ) : null}
+      <div data-plane-panel="true">
         <TopBar />
       </div>
-      <div data-within-panel="true">
-        <LeftSidebar />
-      </div>
-      <div data-within-panel="true">
-        <Inspector />
-      </div>
-      {libraryDrag ? <DragGhost type={libraryDrag.type} x={libraryDrag.clientX} y={libraryDrag.clientY} /> : null}
-      <LayersPanel />
-      <ContextMenu />
-      <DeleteWallDialog />
+      {is3d ? null : (
+        <>
+          <div data-plane-panel="true">
+            <LeftSidebar />
+          </div>
+          <div data-plane-panel="true">
+            <Inspector />
+          </div>
+          {libraryDrag ? <DragGhost type={libraryDrag.type} x={libraryDrag.clientX} y={libraryDrag.clientY} /> : null}
+          <LayersPanel />
+          <ContextMenu />
+          <DeleteWallDialog />
+        </>
+      )}
     </div>
   )
 }

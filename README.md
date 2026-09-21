@@ -1,6 +1,6 @@
 # Plane
 
-**Within** is a personal spatial-design sandbox: a 2D top-down floor-plan editor for recreating apartments and trying furniture layouts.
+**Plane** is a personal spatial-design sandbox: a 2D top-down floor-plan editor for recreating apartments and trying furniture layouts.
 
 ## Run
 

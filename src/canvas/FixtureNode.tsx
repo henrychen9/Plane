@@ -1,12 +1,12 @@
 import { Ellipse, Group, Line, Rect } from 'react-konva'
 import { snapFixture } from '../architecture/fixtureSnap'
 import { PIXELS_PER_INCH } from '../editor/constants'
-import { startFreeGroupDrag, activeGroupDelta, endFreeGroupDrag, translateLayoutGroup } from '../editor/groupMove'
-import { canGroupTranslate, isSelected } from '../editor/selection'
+import { canRigidGroupDrag, isSelected } from '../editor/selection'
 import { useEditorStore } from '../state/editorStore'
-import { getLayout, useProjectStore } from '../state/projectStore'
+import { useProjectStore } from '../state/projectStore'
 import type { Fixture, FloorPlan } from '../types/spatial'
 import { snapThresholdInches } from '../utils/snap'
+import { beginRigidGroupDrag } from './groupDrag'
 
 export function FixtureNode({
   projectId,
@@ -31,14 +31,15 @@ export function FixtureNode({
   const altHeld = useEditorStore((state) => state.altHeld)
   const gridEnabled = useEditorStore((state) => state.gridEnabled)
   const zoom = useEditorStore((state) => state.zoom)
+  const selections = useEditorStore((state) => state.selections)
   const setContextMenu = useEditorStore((state) => state.setContextMenu)
   const selectObject = useEditorStore((state) => state.selectObject)
   const captureHistory = useEditorStore((state) => state.captureHistory)
   const updateFixture = useProjectStore((state) => state.updateFixture)
-  const patchLayout = useProjectStore((state) => state.patchLayout)
   const fill = selected ? '#ddd6ca' : '#e4ddd1'
   const stroke = selected ? '#2c2a26' : '#8d877e'
   const finCount = Math.max(3, Math.floor(fixture.width / 4))
+  const inRigidGroup = selected && canRigidGroupDrag(selections)
 
   return (
     <Group
@@ -47,11 +48,19 @@ export function FixtureNode({
       offsetX={fixture.width / 2}
       offsetY={fixture.depth / 2}
       rotation={fixture.rotation}
-      draggable={interactive && !locked}
+      draggable={interactive && !locked && !inRigidGroup}
       onMouseDown={(event) => {
         if (!interactive) return
         event.cancelBubble = true
-        selectObject({ kind: 'fixture', id: fixture.id }, event.evt.shiftKey)
+        if (event.evt.shiftKey) {
+          selectObject({ kind: 'fixture', id: fixture.id }, true)
+          return
+        }
+        if (inRigidGroup) {
+          beginRigidGroupDrag({ projectId, layoutId, stage: event.target.getStage() })
+          return
+        }
+        selectObject({ kind: 'fixture', id: fixture.id })
       }}
       onContextMenu={(event) => {
         event.evt.preventDefault()
@@ -64,32 +73,18 @@ export function FixtureNode({
         })
       }}
       onDragStart={(event) => {
-        const editor = useEditorStore.getState()
-        const selected = isSelected(editor.selections, 'fixture', fixture.id)
-        if (editor.selections.length > 1 && selected && !canGroupTranslate(editor.selections)) {
+        if (!(interactive && !locked && !inRigidGroup)) {
           event.target.stopDrag()
           event.target.position({ x: fixture.x + fixture.width / 2, y: fixture.y + fixture.depth / 2 })
-          editor.setHoverHint('Some selected items are wall-mounted.')
           return
         }
-        if (!(editor.selections.length > 1 && selected)) {
+        if (!isSelected(useEditorStore.getState().selections, 'fixture', fixture.id)) {
           selectObject({ kind: 'fixture', id: fixture.id })
-        }
-        const layout = getLayout(projectId, layoutId)
-        if (layout && editor.selections.length > 1 && selected && canGroupTranslate(editor.selections)) {
-          startFreeGroupDrag(layout, editor.selections, fixture.id, fixture.x, fixture.y)
         }
         captureHistory()
       }}
       onDragMove={(event) => {
         const node = event.target
-        const group = activeGroupDelta(node.x() - fixture.width / 2, node.y() - fixture.depth / 2)
-        if (group) {
-          patchLayout(projectId, layoutId, (current) => translateLayoutGroup(current, group.snapshot, group.dx, group.dy), {
-            rebuild: false,
-          })
-          return
-        }
         const proposed: Fixture = {
           ...fixture,
           x: node.x() - fixture.width / 2,
@@ -103,7 +98,6 @@ export function FixtureNode({
         node.position({ x: snapped.x + fixture.width / 2, y: snapped.y + fixture.depth / 2 })
         updateFixture(projectId, layoutId, fixture.id, { x: snapped.x, y: snapped.y, rotation: snapped.rotation })
       }}
-      onDragEnd={() => endFreeGroupDrag()}
     >
       {fixture.type === 'column' && fixture.shape === 'circle' ? (
         <Ellipse
